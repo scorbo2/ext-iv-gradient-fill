@@ -18,9 +18,11 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
@@ -28,11 +30,14 @@ import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Point;
 import java.awt.RenderingHints;
-import java.awt.geom.Point2D;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.geom.Ellipse2D;
+import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -63,6 +68,7 @@ public class GradientFillDialog extends JDialog {
     private int imgWidth;
     private int imgHeight;
     private final ImagePanel imagePanel;
+    private BufferedImage gradientPreviewBuffer;
 
     private ColorField startColorField;
     private ColorField endColorField;
@@ -70,6 +76,14 @@ public class GradientFillDialog extends JDialog {
     private NumberField startYField;
     private NumberField endXField;
     private NumberField endYField;
+    private boolean suppressGradientRender;
+    private DragTarget activeDragTarget = DragTarget.NONE;
+
+    private enum DragTarget {
+        NONE,
+        START,
+        END
+    }
 
     /**
      * Creates a new GradientFillDialog based on the image represented by the given file.
@@ -93,6 +107,9 @@ public class GradientFillDialog extends JDialog {
         imagePanel = new ImagePanel(ImagePanelConfig.createSimpleReadOnlyProperties());
         add(buildControlPanel(), BorderLayout.WEST);
         add(imagePanel, BorderLayout.CENTER);
+        PointDragListener pointDragListener = new PointDragListener();
+        imagePanel.addMouseListener(pointDragListener);
+        imagePanel.addMouseMotionListener(pointDragListener);
         configureKeyboardShortcuts();
         loadImage();
     }
@@ -119,8 +136,7 @@ public class GradientFillDialog extends JDialog {
         if (getMessageUtil().askYesNo("Confirm",
                                       "Save current changes and close?\nThis will overwrite the original image.")
             == MessageUtil.YES) {
-            saveChanges();
-            dispose();
+            saveChanges(); // will dispose() on success
         }
     }
 
@@ -130,6 +146,12 @@ public class GradientFillDialog extends JDialog {
      * in the MainWindow should already be updated to show the result.
      */
     private void saveChanges() {
+        // if we're in a wonky state, I guess we're done here:
+        if (dBuffer == null || originalImage == null) {
+            getMessageUtil().info("Nothing to save.");
+            dispose();
+            return;
+        }
 
         // Start with the original image:
         Graphics2D graphics = dBuffer.createGraphics();
@@ -138,11 +160,13 @@ public class GradientFillDialog extends JDialog {
             graphics.drawImage(originalImage, 0, 0, null);
             drawGradient(graphics);
             graphics.dispose();
+            graphics = null;
             targetGraphics.drawImage(dBuffer, 0, 0, null);
             targetGraphics.dispose();
+            targetGraphics = null;
 
             getMessageUtil().getLogger().log(Level.INFO, "Gradient fill: saving image {0}", srcFile.getAbsolutePath());
-            if (srcFile.getName().toLowerCase().endsWith("png")) {
+            if (srcFile.getName().toLowerCase(Locale.ROOT).endsWith("png")) {
                 ImageUtil.savePngImage(originalImage, srcFile);
             }
             else if (srcFile.getName().toLowerCase(Locale.ROOT).endsWith("jpg") ||
@@ -165,6 +189,14 @@ public class GradientFillDialog extends JDialog {
         catch (IOException ioe) {
             getMessageUtil().error("Problem saving image: " + ioe.getMessage(), ioe);
         }
+        finally {
+            if (graphics != null) {
+                graphics.dispose();
+            }
+            if (targetGraphics != null) {
+                targetGraphics.dispose();
+            }
+        }
     }
 
     /**
@@ -172,19 +204,30 @@ public class GradientFillDialog extends JDialog {
      * and show the results in our preview area. Also shows our two draggable control points.
      */
     private void updateGradient() {
-        // Figure out a size for our drag points so that they render
-        // consistently regardless of image size:
-        int markerDiameter = imgWidth / 75;
-        markerDiameter = Math.max(markerDiameter, 10); // enforce a minimum marker size for very small images
-
-        // Start with the original image:
-        Graphics2D graphics = dBuffer.createGraphics();
+        // Start with the original image and render fresh gradient:
+        Graphics2D graphics = gradientPreviewBuffer.createGraphics();
         try {
             graphics.drawImage(originalImage, 0, 0, null);
-
             drawGradient(graphics);
+        }
+        finally {
+            graphics.dispose();
+        }
+        updateMarkerOverlayOnly();
+    }
 
-            // Overlay our draggable marker points:
+    /**
+     * Re-renders only the point markers on top of the last gradient render. This is used while dragging
+     * to keep interaction smooth and avoid recomputing the full gradient on each mouse move.
+     */
+    private void updateMarkerOverlayOnly() {
+        // Figure out a size for our drag points so that they render
+        // consistently regardless of image size:
+        int markerDiameter = getMarkerDiameter();
+
+        Graphics2D graphics = dBuffer.createGraphics();
+        try {
+            graphics.drawImage(gradientPreviewBuffer, 0, 0, null);
             drawStartPoint(graphics, markerDiameter);
             drawEndPoint(graphics, markerDiameter);
         }
@@ -266,28 +309,28 @@ public class GradientFillDialog extends JDialog {
 
         startColorField = new ColorField("Start color:", ColorSelectionType.SOLID);
         startColorField.setColor(Color.BLACK);
-        startColorField.addValueChangedListener(_ -> updateGradient());
+        startColorField.addValueChangedListener(_ -> onFieldValueChanged());
         formPanel.add(startColorField);
 
         endColorField = new ColorField("End color:", ColorSelectionType.SOLID);
         endColorField.setColor(new Color(0,0,0,0));
-        endColorField.addValueChangedListener(_ -> updateGradient());
+        endColorField.addValueChangedListener(_ -> onFieldValueChanged());
         formPanel.add(endColorField);
 
         startXField = new NumberField("Start X:", 0, 0, Integer.MAX_VALUE, 1);
-        startXField.addValueChangedListener(_ -> updateGradient());
+        startXField.addValueChangedListener(_ -> onFieldValueChanged());
         formPanel.add(startXField);
 
         startYField = new NumberField("Start Y:", 0, 0, Integer.MAX_VALUE, 1);
-        startYField.addValueChangedListener(_ -> updateGradient());
+        startYField.addValueChangedListener(_ -> onFieldValueChanged());
         formPanel.add(startYField);
 
         endXField = new NumberField("End X:", 0, 0, Integer.MAX_VALUE, 1);
-        endXField.addValueChangedListener(_ -> updateGradient());
+        endXField.addValueChangedListener(_ -> onFieldValueChanged());
         formPanel.add(endXField);
 
         endYField = new NumberField("End Y:", 0, 0, Integer.MAX_VALUE, 1);
-        endYField.addValueChangedListener(_ -> updateGradient());
+        endYField.addValueChangedListener(_ -> onFieldValueChanged());
         formPanel.add(endYField);
 
         PanelField wrapper = new PanelField(new GridBagLayout());
@@ -329,6 +372,7 @@ public class GradientFillDialog extends JDialog {
             imgHeight = originalImage.getHeight();
             // We create our dBuffer with an alpha channel even if the source image didn't have one:
             dBuffer = new BufferedImage(imgWidth, imgHeight, BufferedImage.TYPE_INT_ARGB);
+            gradientPreviewBuffer = new BufferedImage(imgWidth, imgHeight, BufferedImage.TYPE_INT_ARGB);
             resetAll();
             updateGradient();
         }
@@ -339,26 +383,8 @@ public class GradientFillDialog extends JDialog {
     }
 
     /**
-     * Adjusting the crop is managed via a combination of arrow keys and toggle buttons to control
-     * the increment. The keyboard shortcuts are as follows:
-     * <ul>
-     *     <li>Left/right arrows = move left crop border</li>
-     *     <li>Up/down arrows = move top crop border</li>
-     *     <li>Shift + left/right arrows = move right crop border</li>
-     *     <li>Shift + up/down arrows = move bottom crop border</li>
-     *     <li>Ctrl+Z to reset the crop to 0 (i.e. revert the crop to match the image's borders)</li>
-     *     <li>Ctrl+1, Ctrl+2, Ctrl+3 to select the movement increment (small, medium, large) -
-     *         this is equivalent to clicking the toggle buttons.</li>
-     * </ul>
-     * <P>
-     *     Use the "small", "medium", and "large" toggle buttons to
-     *     control the increment for these shortcuts. This allows you to fine-tune
-     *     crop movements, even on higher-resolution images.
-     * </P>
-     * <p>
-     *     And, as usual for dialogs, ESC will cancel the dialog, and Enter
-     *     will prompt to save the current crop and close the dialog.
-     * </p>
+     * As usual for dialogs, ESC will cancel the dialog, and Enter
+     * will prompt to save the current edit and close the dialog.
      */
     private void configureKeyboardShortcuts() {
         keyStrokeManager.clear();
@@ -371,6 +397,68 @@ public class GradientFillDialog extends JDialog {
             messageUtil = new MessageUtil(this, Logger.getLogger(GradientFillDialog.class.getName()));
         }
         return messageUtil;
+    }
+
+    private int getMarkerDiameter() {
+        int markerDiameter = imgWidth / 75;
+        return Math.max(markerDiameter, 10); // enforce a minimum marker size for very small images
+    }
+
+    private void onFieldValueChanged() {
+        if (!suppressGradientRender) {
+            updateGradient();
+        }
+    }
+
+    private Point clampToImage(Point point) {
+        int x = Math.max(0, Math.min(point.x, imgWidth - 1));
+        int y = Math.max(0, Math.min(point.y, imgHeight - 1));
+        return new Point(x, y);
+    }
+
+    private DragTarget getDragTargetAt(Point imagePoint) {
+        int markerRadius = getMarkerDiameter() / 2;
+        int radiusSquared = markerRadius * markerRadius;
+        int startX = startXField.getCurrentValue().intValue();
+        int startY = startYField.getCurrentValue().intValue();
+        int endX = endXField.getCurrentValue().intValue();
+        int endY = endYField.getCurrentValue().intValue();
+
+        int startDx = imagePoint.x - startX;
+        int startDy = imagePoint.y - startY;
+        int endDx = imagePoint.x - endX;
+        int endDy = imagePoint.y - endY;
+        boolean inStart = (startDx * startDx + startDy * startDy) <= radiusSquared;
+        boolean inEnd = (endDx * endDx + endDy * endDy) <= radiusSquared;
+        if (inStart && inEnd) {
+            return (startDx * startDx + startDy * startDy) <= (endDx * endDx + endDy * endDy)
+                    ? DragTarget.START : DragTarget.END;
+        }
+        if (inStart) {
+            return DragTarget.START;
+        }
+        if (inEnd) {
+            return DragTarget.END;
+        }
+        return DragTarget.NONE;
+    }
+
+    private void applyPointToTarget(DragTarget target, Point imagePoint) {
+        Point clamped = clampToImage(imagePoint);
+        suppressGradientRender = true;
+        try {
+            if (target == DragTarget.START) {
+                startXField.setCurrentValue(clamped.x);
+                startYField.setCurrentValue(clamped.y);
+            }
+            else if (target == DragTarget.END) {
+                endXField.setCurrentValue(clamped.x);
+                endYField.setCurrentValue(clamped.y);
+            }
+        }
+        finally {
+            suppressGradientRender = false;
+        }
     }
 
     /**
@@ -391,6 +479,10 @@ public class GradientFillDialog extends JDialog {
             dBuffer.flush();
             dBuffer = null;
         }
+        if (gradientPreviewBuffer != null) {
+            gradientPreviewBuffer.flush();
+            gradientPreviewBuffer = null;
+        }
     }
 
     /**
@@ -407,6 +499,73 @@ public class GradientFillDialog extends JDialog {
         @Override
         public void windowClosed(WindowEvent e) {
             cleanup();
+        }
+    }
+
+    private class PointDragListener extends MouseAdapter {
+        @Override
+        public void mousePressed(MouseEvent e) {
+            if (!SwingUtilities.isLeftMouseButton(e)) {
+                activeDragTarget = DragTarget.NONE;
+                return;
+            }
+            Point translated = imagePanel.getTranslatedPoint(e.getPoint());
+            activeDragTarget = getDragTargetAt(translated);
+            if (activeDragTarget != DragTarget.NONE) {
+                imagePanel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                e.consume();
+            }
+        }
+
+        @Override
+        public void mouseReleased(MouseEvent e) {
+            if (activeDragTarget != DragTarget.NONE) {
+                Point translated = imagePanel.getTranslatedPoint(e.getPoint());
+                applyPointToTarget(activeDragTarget, translated);
+                activeDragTarget = DragTarget.NONE;
+                updateGradient();
+            }
+            else {
+                activeDragTarget = DragTarget.NONE;
+            }
+
+            Point translated = imagePanel.getTranslatedPoint(e.getPoint());
+            DragTarget hoverTarget = getDragTargetAt(translated);
+            imagePanel.setCursor(hoverTarget == DragTarget.NONE
+                                         ? Cursor.getDefaultCursor()
+                                         : Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        }
+
+        @Override
+        public void mouseDragged(MouseEvent e) {
+            if (activeDragTarget == DragTarget.NONE) {
+                return;
+            }
+            Point translated = imagePanel.getTranslatedPoint(e.getPoint());
+            applyPointToTarget(activeDragTarget, translated);
+            updateMarkerOverlayOnly();
+            e.consume();
+        }
+
+        @Override
+        public void mouseMoved(MouseEvent e) {
+            if (activeDragTarget != DragTarget.NONE) {
+                imagePanel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                return;
+            }
+
+            Point translated = imagePanel.getTranslatedPoint(e.getPoint());
+            DragTarget hoverTarget = getDragTargetAt(translated);
+            imagePanel.setCursor(hoverTarget == DragTarget.NONE
+                                         ? Cursor.getDefaultCursor()
+                                         : Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        }
+
+        @Override
+        public void mouseExited(MouseEvent e) {
+            if (activeDragTarget == DragTarget.NONE) {
+                imagePanel.setCursor(Cursor.getDefaultCursor());
+            }
         }
     }
 }

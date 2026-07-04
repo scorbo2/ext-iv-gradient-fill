@@ -6,6 +6,7 @@ import ca.corbett.imageviewer.ui.MainWindow;
 
 import java.awt.event.ActionEvent;
 import java.io.File;
+import java.util.Locale;
 
 /**
  * Launches the GradientFillDialog based on the currently selected image, if there is one.
@@ -38,7 +39,7 @@ public class GradientFillAction extends EnhancedAction {
 
         // Ensure correct file format:
         File file = currentImage.getImageFile();
-        String filename = file.getName().toLowerCase();
+        String filename = file.getName().toLowerCase(Locale.ROOT);
         if (!filename.endsWith("jpg")
             && !filename.endsWith("jpeg")
             && !filename.endsWith("png")) {
