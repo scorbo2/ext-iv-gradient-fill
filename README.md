@@ -21,7 +21,7 @@ It's just that easy!
 ### Option 2: manual download and install
 
 You can manually download the extension jar:
-[ext-iv-gradient-fill-3.3.0.jar](https://www.corbett.ca/apps/ImageViewer/extensions/3.3/ext-iv-image-crop-3.3.0.jar)
+[ext-iv-gradient-fill-3.3.0.jar](https://www.corbett.ca/apps/ImageViewer/extensions/3.3/ext-iv-gradient-fill-3.3.0.jar)
 
 Save it to your ~/.ImageViewer/extensions directory and restart the application.
 
@@ -31,11 +31,11 @@ You can clone this repo and build the extension jar with Maven (Java 17 or highe
 
 ```shell
 git clone https://github.com/scorbo2/ext-iv-gradient-fill.git
-cd ext-iv-image-crop
+cd ext-iv-gradient-fill
 mvn package
 
 # Copy the result to extensions dir:
-cp target/ext-iv-image-crop-3.3.0.jar ~/.ImageViewer/extensions/
+cp target/ext-iv-gradient-fil-3.3.0.jar ~/.ImageViewer/extensions/
 ```
 
 ## Okay, it's installed, now how do I use it?
