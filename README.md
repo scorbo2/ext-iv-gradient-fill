@@ -24,15 +24,20 @@ Save it to your ~/.ImageViewer/extensions directory and restart the application.
 
 ### Option 3: build from source
 
-You can clone this repo and build the extension jar with Maven (Java 17 or higher required):
+You can clone this repo and build the extension jar with Maven (Java 25 or higher required):
 
 ```shell
 git clone https://github.com/scorbo2/ext-iv-gradient-fill.git
 cd ext-iv-gradient-fill
-mvn package
+
+# Note: you must have built ImageViewer and
+# installed it in your local Maven repo in order
+# for this step to work. See the ImageViewer 
+# README for instructions.
+mvn clean package
 
 # Copy the result to extensions dir:
-cp target/ext-iv-gradient-fil-3.3.0.jar ~/.ImageViewer/extensions/
+cp target/ext-iv-gradient-fill-3.3.0.jar ~/.ImageViewer/extensions/
 ```
 
 ## Okay, it's installed, now how do I use it?
