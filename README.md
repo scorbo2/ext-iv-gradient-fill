@@ -9,11 +9,8 @@ This is an extension for the [ImageViewer](https://github.com/scorbo2/imageviewe
 
 ### Option 1: automatic download and install
 
-Visit the "Available" tab in the new and improved extension manager dialog:
-
-![Extension manager](extension_manager.jpg "Extension manager")
-
-Select "Gradient fill" from the list on the left and then hit the "Install" button in the top right.
+Visit the "Available" tab in the extension manager dialog. Select "Gradient fill" from the list on the
+left and then hit the "Install" button in the top right.
 If you decide later to remove the extension, come back to the extension manager dialog, select "Gradient fill"
 from the list on the left, and hit the "Uninstall" button in the top right. The application will prompt to restart.
 It's just that easy!
