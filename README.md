@@ -1,9 +1,9 @@
 # ext-iv-gradient-fill
-An extension for ImageViewer to allow highly customizable gradient fills on supported images.
 
 ## What is this?
 
-This is an extension for the [ImageViewer](https://github.com/scorbo2/imageviewer) application that allows you to apply a gradient fill to the selected image.
+This is an extension for the [ImageViewer](https://github.com/scorbo2/imageviewer) application that allows you to apply
+a highly-customizable gradient fill to the selected image (JPEG or PNG only).
 
 ## How do I get it?
 
